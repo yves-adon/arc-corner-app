@@ -2393,7 +2393,7 @@ function ResultBtn({ active, color, onClick, children }) {
     </button>
   );
 }
-function HistoriqueTab({ bets, setResult, removeBet, addManualBet }) {
+function HistoriqueTab({ bets, setResult, removeBet, addManualBet, updateCote }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <QuickAddForm onAdd={addManualBet} />
@@ -2404,8 +2404,18 @@ function HistoriqueTab({ bets, setResult, removeBet, addManualBet }) {
             <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.3 }}>{b.label}</div>
             <IconBtn onClick={() => removeBet(b.id)} color={C.faint} title="Supprimer"><Trash2 size={13} /></IconBtn>
           </div>
-          <div style={{ display: "flex", gap: 10, fontFamily: FONT_MONO, fontSize: 11.5, color: C.dim, flexWrap: "wrap" }}>
-            {b.cote && <span>cote {parseFloat(b.cote).toFixed(2)}</span>}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", fontFamily: FONT_MONO, fontSize: 11.5, color: C.dim, flexWrap: "wrap" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              cote
+              <input
+                type="number"
+                inputMode="decimal"
+                value={b.cote || ""}
+                placeholder="1.85"
+                onChange={(e) => updateCote(b.id, e.target.value)}
+                style={{ width: 52, background: C.surface2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "3px 6px", color: C.text, fontFamily: FONT_MONO, fontSize: 11.5, outline: "none" }}
+              />
+            </span>
             {b.probUsed !== null && <span>prob. {(b.probUsed * 100).toFixed(0)}%</span>}
             {b.edge !== null && b.edge !== undefined && <span style={{ color: b.edge >= 0 ? C.solide : C.fragile, fontWeight: 700 }}>edge {b.edge >= 0 ? "+" : ""}{b.edge.toFixed(1)}</span>}
             <span>{new Date(b.createdAt).toLocaleDateString("fr-FR")}</span>
@@ -2609,6 +2619,7 @@ export default function App() {
   const addBet = (payload) => persist([{ id: uid(), createdAt: new Date().toISOString(), stake: 1, result: "pending", ...payload }, ...bets]);
   const setResult = (id, result) => persist(bets.map((b) => (b.id === id ? { ...b, result } : b)));
   const removeBet = (id) => persist(bets.filter((b) => b.id !== id));
+  const updateCote = (id, cote) => persist(bets.map((b) => (b.id === id ? { ...b, cote } : b)));
 
   const stats = useMemo(() => {
     const resolved = bets.filter((b) => b.result !== "pending");
@@ -2788,7 +2799,7 @@ export default function App() {
         ) : tab === "comparateur" ? (
           <ComparateurTab teamA={teamA} setTeamA={setTeamA} teamB={teamB} setTeamB={setTeamB} lignes={lignes} setLignes={setLignes} individuels={individuels} setIndividuels={setIndividuels} h2h={h2h} setH2h={setH2h} onAddBet={addBet} />
         ) : tab === "historique" ? (
-          <HistoriqueTab bets={bets} setResult={setResult} removeBet={removeBet} addManualBet={addBet} />
+          <HistoriqueTab bets={bets} setResult={setResult} removeBet={removeBet} addManualBet={addBet} updateCote={updateCote} />
         ) : (
           <BilanTab stats={stats} />
         )}
