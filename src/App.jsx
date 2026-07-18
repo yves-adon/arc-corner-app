@@ -2489,6 +2489,24 @@ function BilanTab({ stats }) {
           </div>
         </div>
       )}
+      {stats.verdicts && stats.verdicts.length > 0 && (
+        <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <SectionTitle sub="le ratio marge/volatilité est-il un vrai indicateur de qualité, ou juste du bruit ?">Par verdict</SectionTitle>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {stats.verdicts.map((v) => (
+              <div key={v.verdict} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
+                <Pill color={verdictColor(v.verdict)}>{v.verdict}</Pill>
+                <span style={{ fontFamily: FONT_MONO, color: C.dim, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{v.won}G / {v.lost}P{v.push ? ` / ${v.push} push` : ""}</span>
+                  <b style={{ color: v.winRate === null ? C.faint : v.winRate >= 50 ? C.solide : C.fragile, minWidth: 34, textAlign: "right" }}>
+                    {v.winRate !== null ? `${v.winRate.toFixed(0)}%` : "—"}
+                  </b>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2655,7 +2673,23 @@ export default function App() {
       })
       .sort((a, b) => b.decided - a.decided);
 
-    return { won, lost, push, decided, winRate, cumul: Number(cumul.toFixed(2)), series, avgEdge, total: bets.length, categories };
+    // taux de réussite par verdict (Solide / Jouable / Fragile) — répond à "est-ce que
+    // le ratio marge/volatilité est un vrai indicateur de qualité, ou du bruit ?"
+    const verdictOrder = { Solide: 0, Jouable: 1, Fragile: 2 };
+    const byVerdict = {};
+    resolved.forEach((b) => {
+      if (!b.verdict) return;
+      if (!byVerdict[b.verdict]) byVerdict[b.verdict] = { won: 0, lost: 0, push: 0 };
+      byVerdict[b.verdict][b.result === "won" ? "won" : b.result === "lost" ? "lost" : "push"]++;
+    });
+    const verdicts = Object.entries(byVerdict)
+      .map(([verdict, c]) => {
+        const dec = c.won + c.lost;
+        return { verdict, won: c.won, lost: c.lost, push: c.push, decided: dec, winRate: dec ? (c.won / dec) * 100 : null };
+      })
+      .sort((a, b) => (verdictOrder[a.verdict] ?? 9) - (verdictOrder[b.verdict] ?? 9));
+
+    return { won, lost, push, decided, winRate, cumul: Number(cumul.toFixed(2)), series, avgEdge, total: bets.length, categories, verdicts };
   }, [bets]);
 
   const tabs = [
