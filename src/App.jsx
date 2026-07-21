@@ -446,6 +446,11 @@ function computeHistoryStats(matches, alpha = 0.25, includeAdvanced = true) {
   const vndMT1 = computeVND(matches, "corners1MTObtenus", "corners1MTConcedes");
   const vndMT2 = computeVND(matches, "corners2MTObtenus", "corners2MTConcedes");
 
+  // buts (match complet) — extraits automatiquement du score lors du collage Xodo,
+  // même logique EWMA/volatilité/projection que les corners
+  const butsSeries = computeStatSeries(matches, "butsObtenus", "butsConcedes", alpha);
+  const vndButs = computeVND(matches, "butsObtenus", "butsConcedes");
+
   return {
     ...corners,
     vndTotal,
@@ -459,6 +464,8 @@ function computeHistoryStats(matches, alpha = 0.25, includeAdvanced = true) {
     mt2Series,
     vndMT1,
     vndMT2,
+    butsSeries,
+    vndButs,
   };
 }
 
@@ -488,6 +495,8 @@ function pickVenueStats(team, venue, minN = 3) {
       vndTotal: venueStats.vndTotal,
       vndMT1: venueStats.vndMT1,
       vndMT2: venueStats.vndMT2,
+      butsSeries: venueStats.butsSeries,
+      vndButs: venueStats.vndButs,
     };
   }
   if (overall) {
@@ -507,9 +516,11 @@ function pickVenueStats(team, venue, minN = 3) {
       vndTotal: overall.vndTotal,
       vndMT1: overall.vndMT1,
       vndMT2: overall.vndMT2,
+      butsSeries: overall.butsSeries,
+      vndButs: overall.vndButs,
     };
   }
-  return { nom: team.nom, obtenus: num(team.obtenus), concedes: num(team.concedes), part: team.part, ewma: team.ewma, volatilite: null, source: "manuel", n: 0, tirsSeries: null, attDangSeries: null, mt1Series: null, mt2Series: null, vndTotal: null, vndMT1: null, vndMT2: null };
+  return { nom: team.nom, obtenus: num(team.obtenus), concedes: num(team.concedes), part: team.part, ewma: team.ewma, volatilite: null, source: "manuel", n: 0, tirsSeries: null, attDangSeries: null, mt1Series: null, mt2Series: null, vndTotal: null, vndMT1: null, vndMT2: null, butsSeries: null, vndButs: null };
 }
 
 function BulkPaste({ onImport, color }) {
@@ -727,6 +738,13 @@ function parseTotalCornerBlock(raw, teamName) {
     const zoneHome = block.slice(0, m1.index).toLowerCase().replace(/\s+/g, " ");
     const zoneAway = block.slice(m1.index + m1[0].length, m2.index).toLowerCase().replace(/\s+/g, " ");
 
+    // score final (buts) — apparaît toujours juste entre les deux liens d'équipe, avant
+    // le nom de l'équipe extérieure, ex. "...Manta FC (/fr/team/view/2773) 0 - 0
+    // Orense..." → premier couple "X - Y" rencontré dans cette zone
+    const scoreMatch = zoneAway.match(/(\d+)\s*-\s*(\d+)/);
+    const butsHome = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+    const butsAway = scoreMatch ? parseInt(scoreMatch[2], 10) : null;
+
     const tail = block.slice(m2.index + m2[0].length);
     const tailRaw = tail;
 
@@ -787,6 +805,8 @@ function parseTotalCornerBlock(raw, teamName) {
         corners1MTConcedes: "",
         corners2MTObtenus: "",
         corners2MTConcedes: "",
+        butsObtenus: butsHome !== null ? String(isHome ? butsHome : butsAway) : "",
+        butsConcedes: butsHome !== null ? String(isHome ? butsAway : butsHome) : "",
       };
       if (inlineHalfFound) {
         const mt1Obt = isHome ? half1Home : half1Away;
@@ -1113,12 +1133,16 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
                 <NumInput value={m.corners2MTObtenus || ""} onChange={(v) => update(m.id, { ...m, corners2MTObtenus: v })} placeholder="corners 2MT obt." accent={C.faint} />
                 <NumInput value={m.corners2MTConcedes || ""} onChange={(v) => update(m.id, { ...m, corners2MTConcedes: v })} placeholder="corners 2MT conc." accent={C.faint} />
               </div>
+              <div style={{ display: "flex", gap: 5, alignItems: "center", paddingLeft: 18 }}>
+                <NumInput value={m.butsObtenus || ""} onChange={(v) => update(m.id, { ...m, butsObtenus: v })} placeholder="buts obt." accent={C.faint} />
+                <NumInput value={m.butsConcedes || ""} onChange={(v) => update(m.id, { ...m, butsConcedes: v })} placeholder="buts conc." accent={C.faint} />
+              </div>
             </>
           )}
         </div>
       ))}
       <button
-        onClick={() => setMatches([{ id: uid(), obtenus: "", concedes: "", lieu: "", tirsObtenus: "", tirsConcedes: "", attDangObtenus: "", attDangConcedes: "", corners1MTObtenus: "", corners1MTConcedes: "", corners2MTObtenus: "", corners2MTConcedes: "" }, ...matches])}
+        onClick={() => setMatches([{ id: uid(), obtenus: "", concedes: "", lieu: "", tirsObtenus: "", tirsConcedes: "", attDangObtenus: "", attDangConcedes: "", corners1MTObtenus: "", corners1MTConcedes: "", corners2MTObtenus: "", corners2MTConcedes: "", butsObtenus: "", butsConcedes: "" }, ...matches])}
         style={{ ...addRowStyle(), marginTop: 0, padding: "7px", fontSize: 12 }}
       >
         <Plus size={12} /> Ajouter un match
@@ -2194,6 +2218,17 @@ function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, i
         teamAName={teamA.nom}
         teamBName={teamB.nom}
         showHandicapSignal
+      />
+
+      <SecondaryStatPanel
+        label="Buts (match complet)"
+        unit="buts"
+        seriesA={effA.butsSeries}
+        seriesB={effB.butsSeries}
+        sourceA={effA.source}
+        sourceB={effB.source}
+        teamAName={teamA.nom}
+        teamBName={teamB.nom}
       />
 
       <H2hSection h2h={h2h} setH2h={setH2h} teamAName={teamA.nom} teamBName={teamB.nom} seasonProj={proj.total} />
