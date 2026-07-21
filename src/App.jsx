@@ -1548,7 +1548,7 @@ function MiTempsRecommendation({ recMT1, recMT2, teamAName, teamBName, matchLabe
    attaques dangereuses — entièrement optionnel, n'apparaît que si les deux équipes ont
    assez de données saisies. Contexte domicile/extérieur déjà pris en compte puisque
    seriesA/seriesB viennent de pickVenueStats, comme pour les corners. */
-function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, teamAName, teamBName, showHandicapSignal = false }) {
+function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, teamAName, teamBName, showHandicapSignal = false, showRatioVerdict = false }) {
   if (!seriesA || !seriesB) return null;
   const proj = projection(seriesA.moyObtenus, seriesB.moyConcedes, seriesB.moyObtenus, seriesA.moyConcedes);
   const volCombined = seriesA.volatilite || seriesB.volatilite ? Math.sqrt(seriesA.volatilite ** 2 + seriesB.volatilite ** 2) : null;
@@ -1556,6 +1556,12 @@ function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, t
   // projection ci-dessus), pas seulement l'historique propre d'une équipe — répond au
   // fait qu'un handicap dépend aussi de ce que l'adversaire concède/produit
   const signal = showHandicapSignal ? volumeSignalFromValues(proj.total, volCombined) : null;
+  // verdict ratio (marge / volatilité) — contrairement au signal volume ci-dessus, c'est
+  // une mesure RELATIVE donc valable sur n'importe quel marché sans seuil à recalibrer
+  // (utile typiquement pour les buts, où le volume absolu n'a pas de sens comparable
+  // aux corners)
+  const ratioVerdict = showRatioVerdict ? computeVerdict({ moyenne: proj.projA, ligne: proj.projB, volatilite: volCombined }) : null;
+  const ratioFavori = ratioVerdict ? (ratioVerdict.sens === "Over" ? teamAName || "Équipe A" : teamBName || "Équipe B") : null;
 
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1610,6 +1616,16 @@ function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, t
           </Pill>
           <span style={{ color: C.faint, fontSize: 10 }}>
             (volume projeté {signal.totalProjete.toFixed(2)} · ±{signal.vol.toFixed(2)} — les deux équipes combinées)
+          </span>
+        </div>
+      )}
+
+      {ratioVerdict && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.faint }}>verdict :</span>
+          <Pill color={verdictColor(ratioVerdict.verdict)}>{ratioVerdict.verdict}</Pill>
+          <span style={{ color: C.faint, fontSize: 10 }}>
+            {ratioFavori} favori · marge {ratioVerdict.marge.toFixed(2)} · ratio {ratioVerdict.ratio.toFixed(2)}×
           </span>
         </div>
       )}
@@ -2229,6 +2245,7 @@ function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, i
         sourceB={effB.source}
         teamAName={teamA.nom}
         teamBName={teamB.nom}
+        showRatioVerdict
       />
 
       <H2hSection h2h={h2h} setH2h={setH2h} teamAName={teamA.nom} teamBName={teamB.nom} seasonProj={proj.total} />
