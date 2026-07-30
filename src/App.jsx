@@ -469,7 +469,7 @@ function computeHistoryStats(matches, alpha = 0.25, includeAdvanced = true) {
   };
 }
 
-const emptyTeam = () => ({ nom: "", obtenus: "", concedes: "", part: "", ewma: "", mode: "moyennes", matches: [], useAdvanced: false });
+const emptyTeam = () => ({ nom: "", obtenus: "", concedes: "", part: "", ewma: "", mode: "moyennes", matches: [], useAdvanced: false, compFilter: "toutes" });
 
 /* choisit les stats les plus pertinentes pour CE match : d'abord le sous-ensemble
    domicile/extérieur si assez de matchs tagués (>= minN), sinon tout l'historique,
@@ -719,10 +719,32 @@ function parseTotalCornerBlock(raw, teamName) {
   }));
 
   const blockSplitRe = /\(\/fr\/league\/view\/\d+\)/g;
-  const blockStarts = [...raw.matchAll(blockSplitRe)].map((m) => m.index + m[0].length);
+  const blockMatches = [...raw.matchAll(blockSplitRe)];
+  const blockStarts = blockMatches.map((m) => m.index + m[0].length);
+  const blockMarkerStarts = blockMatches.map((m) => m.index);
   const blocks = raw.split(/\(\/fr\/league\/view\/\d+\)/).slice(1);
   const results = [];
   const skipped = [];
+
+  // Détection automatique du type de compétition (Ligue / Coupe / Autre) à partir du
+  // nom de la ligue, qui apparaît toujours juste avant le marqueur "(/fr/league/view/ID)"
+  // — parfois collé sans espace à la fin d'un lien précédent (ex. "...elfsborg-vsSweden
+  // Allsvenskan"), d'où la détection par la MAJUSCULE/idéogramme de départ plutôt que par
+  // un simple découpage sur les espaces.
+  const detectLeagueName = (markerStart) => {
+    const before = raw.slice(Math.max(0, markerStart - 80), markerStart);
+    const lines = before.split("\n").map((s) => s.trim()).filter(Boolean);
+    const lastLine = lines[lines.length - 1] || "";
+    const nm = lastLine.match(/([A-ZÀ-ÖØ-Þ\p{Script=Han}][\p{L}\s\-'\u2019.]*)$/u);
+    return nm ? nm[1].trim() : "";
+  };
+  const guessCompType = (name) => {
+    const n = name.toLowerCase();
+    if (!n) return "";
+    if (/coupe|cup|copa|pokal|beker|taça|taca/.test(n)) return "C";
+    if (/qualif|champions league|europa league|conference league|uefa|concacaf|libertadores|sudamericana|copa america|amistoso|amical|friendly|友谊赛/.test(n)) return "A";
+    return "L";
+  };
 
   const firstDate = (block) => {
     const m = block.match(/\d{2}\/\d{2}/);
@@ -807,6 +829,7 @@ function parseTotalCornerBlock(raw, teamName) {
         corners2MTConcedes: "",
         butsObtenus: butsHome !== null ? String(isHome ? butsHome : butsAway) : "",
         butsConcedes: butsHome !== null ? String(isHome ? butsAway : butsHome) : "",
+        comp: guessCompType(detectLeagueName(blockMarkerStarts[bi])),
       };
       if (inlineHalfFound) {
         const mt1Obt = isHome ? half1Home : half1Away;
@@ -1066,9 +1089,10 @@ function RawExtractTotalCorner({ teamName, color, onImport }) {
   );
 }
 
-function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, onToggleAdvanced }) {
+function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, onToggleAdvanced, compFilter, onToggleCompFilter }) {
   const update = (id, next) => setMatches(matches.map((m) => (m.id === id ? next : m)));
   const remove = (id) => setMatches(matches.filter((m) => m.id !== id));
+  const nLigue = matches.filter((m) => m.comp === "L").length;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -1087,13 +1111,34 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
           )}
         </div>
       </div>
-      <button
-        onClick={onToggleAdvanced}
-        title={useAdvanced ? "Désactive le calcul (les valeurs déjà saisies restent, mais ne sont plus utilisées)" : "Active le calcul à partir des tirs/attaques dangereuses saisis"}
-        style={{ alignSelf: "flex-start", fontSize: 10, color: useAdvanced ? color : C.faint, background: useAdvanced ? color + "18" : "transparent", border: `1px ${useAdvanced ? "solid" : "dashed"} ${useAdvanced ? color + "55" : C.line}`, borderRadius: 6, padding: "2px 6px", cursor: "pointer" }}
-      >
-        {useAdvanced ? "✓ activé" : "+ activer"} tirs, att. dangereuses & corners par mi-temps (optionnel)
-      </button>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <button
+          onClick={onToggleAdvanced}
+          title={useAdvanced ? "Désactive le calcul (les valeurs déjà saisies restent, mais ne sont plus utilisées)" : "Active le calcul à partir des tirs/attaques dangereuses saisis"}
+          style={{ alignSelf: "flex-start", fontSize: 10, color: useAdvanced ? color : C.faint, background: useAdvanced ? color + "18" : "transparent", border: `1px ${useAdvanced ? "solid" : "dashed"} ${useAdvanced ? color + "55" : C.line}`, borderRadius: 6, padding: "2px 6px", cursor: "pointer" }}
+        >
+          {useAdvanced ? "✓ activé" : "+ activer"} tirs, att. dangereuses & corners par mi-temps (optionnel)
+        </button>
+        <button
+          onClick={onToggleCompFilter}
+          title="Exclut les matchs non tagués « L » (Ligue) du calcul — coupes, continental, amicaux restent visibles mais ignorés"
+          style={{
+            alignSelf: "flex-start",
+            fontSize: 10,
+            color: compFilter === "ligue" ? C.jouable : C.faint,
+            background: compFilter === "ligue" ? C.jouable + "18" : "transparent",
+            border: `1px ${compFilter === "ligue" ? "solid" : "dashed"} ${compFilter === "ligue" ? C.jouable + "55" : C.line}`,
+            borderRadius: 6,
+            padding: "2px 6px",
+            cursor: "pointer",
+          }}
+        >
+          {compFilter === "ligue" ? `✓ ligue uniquement (${nLigue} tagué${nLigue > 1 ? "s" : ""})` : "+ filtrer par compétition"}
+        </button>
+      </div>
+      {compFilter === "ligue" && nLigue === 0 && (
+        <div style={{ fontSize: 10, color: C.fragile }}>Aucun match tagué « L » — tague tes matchs de ligue via le sélecteur L/C/A sur chaque ligne, sinon le calcul se rabat sur tous les matchs.</div>
+      )}
       {useAdvanced && <FbrefShotsImport matches={matches} setMatches={setMatches} color={color} />}
       {matches.map((m, i) => (
         <div key={m.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1108,6 +1153,22 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
                   onClick={() => update(m.id, { ...m, lieu: m.lieu === v ? "" : v })}
                   title={v === "D" ? "Domicile" : "Extérieur"}
                   style={{ width: 20, height: 30, fontSize: 10.5, fontWeight: 700, border: "none", background: m.lieu === v ? color + "33" : C.surface2, color: m.lieu === v ? color : C.faint, cursor: "pointer" }}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexShrink: 0, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.line}` }}>
+              {[
+                { v: "L", title: "Ligue nationale" },
+                { v: "C", title: "Coupe nationale" },
+                { v: "A", title: "Autre (continental, amical...)" },
+              ].map(({ v, title }) => (
+                <button
+                  key={v}
+                  onClick={() => update(m.id, { ...m, comp: m.comp === v ? "" : v })}
+                  title={title}
+                  style={{ width: 18, height: 30, fontSize: 9.5, fontWeight: 700, border: "none", background: m.comp === v ? C.jouable + "33" : C.surface2, color: m.comp === v ? C.jouable : C.faint, cursor: "pointer" }}
                 >
                   {v}
                 </button>
@@ -1142,7 +1203,7 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
         </div>
       ))}
       <button
-        onClick={() => setMatches([{ id: uid(), obtenus: "", concedes: "", lieu: "", tirsObtenus: "", tirsConcedes: "", attDangObtenus: "", attDangConcedes: "", corners1MTObtenus: "", corners1MTConcedes: "", corners2MTObtenus: "", corners2MTConcedes: "", butsObtenus: "", butsConcedes: "" }, ...matches])}
+        onClick={() => setMatches([{ id: uid(), obtenus: "", concedes: "", lieu: "", tirsObtenus: "", tirsConcedes: "", attDangObtenus: "", attDangConcedes: "", corners1MTObtenus: "", corners1MTConcedes: "", corners2MTObtenus: "", corners2MTConcedes: "", butsObtenus: "", butsConcedes: "", comp: "" }, ...matches])}
         style={{ ...addRowStyle(), marginTop: 0, padding: "7px", fontSize: 12 }}
       >
         <Plus size={12} /> Ajouter un match
@@ -1189,7 +1250,11 @@ function VolBadge({ vol, volSource }) {
 
 function TeamProfileForm({ team, setTeam, color, label }) {
   const setMatches = (matches) => setTeam({ ...team, matches });
-  const stats = computeHistoryStats(team.matches, 0.25, !!team.useAdvanced);
+  // filtre compétition : appliqué UNIQUEMENT au calcul, la liste des matchs reste
+  // visible/éditable en entier quel que soit le filtre choisi
+  const compFilter = team.compFilter || "toutes";
+  const filteredMatches = compFilter === "ligue" ? team.matches.filter((m) => m.comp === "L") : team.matches;
+  const stats = computeHistoryStats(filteredMatches, 0.25, !!team.useAdvanced);
   const useHistory = team.mode === "historique";
 
   return (
@@ -1247,10 +1312,12 @@ function TeamProfileForm({ team, setTeam, color, label }) {
             teamName={team.nom}
             useAdvanced={!!team.useAdvanced}
             onToggleAdvanced={() => setTeam({ ...team, useAdvanced: !team.useAdvanced })}
+            compFilter={compFilter}
+            onToggleCompFilter={() => setTeam({ ...team, compFilter: compFilter === "ligue" ? "toutes" : "ligue" })}
           />
           {stats ? (
             <div style={{ background: C.bg, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontFamily: FONT_MONO, fontSize: 11.5, color: C.dim, display: "flex", flexDirection: "column", gap: 3 }}>
-              <div>Calculé sur <b style={{ color: C.text }}>{stats.n}</b> match{stats.n > 1 ? "s" : ""} <span style={{ color: C.faint }}>(tous lieux confondus)</span></div>
+              <div>Calculé sur <b style={{ color: C.text }}>{stats.n}</b> match{stats.n > 1 ? "s" : ""} <span style={{ color: C.faint }}>(tous lieux confondus{compFilter === "ligue" ? " · ligue uniquement" : ""})</span></div>
               <div>moyenne obtenus <b style={{ color: C.text }}>{stats.moyObtenus.toFixed(2)}</b> · concédés <b style={{ color: C.text }}>{stats.moyConcedes.toFixed(2)}</b></div>
               <div>part des corners <b style={{ color: C.text }}>{stats.part.toFixed(0)}%</b> · EWMA <b style={{ color: C.text }}>{stats.ewma >= 0 ? "+" : ""}{stats.ewma.toFixed(2)}</b></div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2003,8 +2070,11 @@ function H2hSection({ h2h, setH2h, teamAName, teamBName, seasonProj }) {
 }
 
 function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, individuels, setIndividuels, h2h, setH2h, onAddBet }) {
-  const effA = pickVenueStats(teamA, "D");
-  const effB = pickVenueStats(teamB, "E");
+  // même filtre compétition que dans le profil solo — appliqué ici aussi pour que le
+  // duel reste cohérent avec ce que l'utilisateur a choisi de regarder par équipe
+  const filterMatches = (team) => (team.compFilter === "ligue" ? { ...team, matches: team.matches.filter((m) => m.comp === "L") } : team);
+  const effA = pickVenueStats(filterMatches(teamA), "D");
+  const effB = pickVenueStats(filterMatches(teamB), "E");
 
   const proj = projection(num(effA.obtenus), num(effB.concedes), num(effB.obtenus), num(effA.concedes));
   const matchLabel = `${teamA.nom || "Équipe A"} vs ${teamB.nom || "Équipe B"}`;
