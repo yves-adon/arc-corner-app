@@ -626,11 +626,33 @@ function parseTotalCornerBlock(raw, teamName) {
   // Le nom BRUT est conservé (pas juste une classification L/C/A) pour permettre un
   // filtre à cocher dynamique, comme celui de TotalCorner lui-même.
   const detectLeagueName = (markerStart) => {
-    const before = raw.slice(Math.max(0, markerStart - 80), markerStart);
+    const before = raw.slice(Math.max(0, markerStart - 160), markerStart);
     const lines = before.split("\n").map((s) => s.trim()).filter(Boolean);
-    const lastLine = lines[lines.length - 1] || "";
-    const nm = lastLine.match(/([A-ZÀ-ÖØ-Þ\p{Script=Han}][\p{L}\s\-'\u2019.]*)$/u);
-    return nm ? nm[1].trim() : "";
+    // on regroupe les 3 dernières lignes (le nom peut être coupé sur plusieurs lignes
+    // en extraction PDF) puis on ne garde que le suffixe qui ressemble à un nom —
+    // lettres/chiffres/espaces/tirets uniquement (les chiffres sont nécessaires pour
+    // des noms comme "Premier League 1"), ce qui élimine naturellement tout fragment
+    // d'URL collé devant (ex. ".../ca-san-miguelArgentina Nacional B")
+    const joined = lines.slice(-3).join(" ");
+    const nm = joined.match(/([A-ZÀ-ÖØ-Þ\p{Script=Han}][\p{L}\d\s\-'\u2019.]*)$/u);
+    if (!nm) return "";
+    let name = nm[1].trim();
+    // certains mots-outils (liens "Cotes"/"Stats"/"En direct", ou l'en-tête du tableau
+    // collé au tout premier match d'un texte) peuvent se retrouver devant le vrai nom
+    // une fois les lignes regroupées — on les retire, en boucle au cas où plusieurs
+    // se suivent
+    const NOISE_PREFIXES = ["Cotes", "Stats", "En direct", "Événements en direct", "Analyse"];
+    let stripped = true;
+    while (stripped) {
+      stripped = false;
+      for (const noise of NOISE_PREFIXES) {
+        if (name.startsWith(noise + " ")) {
+          name = name.slice(noise.length).trim();
+          stripped = true;
+        }
+      }
+    }
+    return name;
   };
 
   const firstDate = (block) => {
