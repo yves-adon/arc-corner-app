@@ -524,114 +524,6 @@ function pickVenueStats(team, venue, minN = 3) {
   return { nom: team.nom, obtenus: num(team.obtenus), concedes: num(team.concedes), part: team.part, ewma: team.ewma, volatilite: null, source: "manuel", n: 0, tirsSeries: null, attDangSeries: null, mt1Series: null, mt2Series: null, vndTotal: null, vndMT1: null, vndMT2: null, butsSeries: null, vndButs: null };
 }
 
-function BulkPaste({ onImport, color }) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [error, setError] = useState("");
-
-  const parse = () => {
-    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-    const parsed = [];
-    for (const line of lines) {
-      const nums = line.match(/-?\d+(\.\d+)?/g);
-      if (!nums || nums.length < 2) continue;
-      const venueMatch = line.match(/\b([dDeE])\b/);
-      const lieu = venueMatch ? venueMatch[1].toUpperCase() : "";
-      parsed.push({ id: uid(), obtenus: nums[0], concedes: nums[1], lieu });
-    }
-    if (!parsed.length) {
-      setError("Aucune paire de nombres reconnue — un match par ligne, ex : 3 5");
-      return;
-    }
-    onImport(parsed);
-    setText("");
-    setError("");
-    setOpen(false);
-  };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} style={{ fontSize: 10.5, color, background: "transparent", border: `1px solid ${color}55`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", flexShrink: 0 }}>
-        Coller en vrac
-      </button>
-    );
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, background: C.bg, border: `1px solid ${color}55`, borderRadius: 8, padding: 8 }}>
-      <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.4 }}>
-        Un match par ligne, <b style={{ color: C.text }}>obtenus concédés</b> (séparés par espace/virgule/tab), du plus récent (en haut) au plus ancien (en bas). Ajoute <b style={{ color: C.text }}>D</b> ou <b style={{ color: C.text }}>E</b> en fin de ligne si tu connais le lieu. Ex : <span style={{ fontFamily: FONT_MONO }}>3 5 D</span>
-      </div>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={"3 5 D\n4 6 E\n2 8\n..."}
-        rows={5}
-        style={{ ...inputStyle, resize: "vertical", fontSize: 13 }}
-      />
-      {error && <div style={{ fontSize: 11, color: C.fragile }}>{error}</div>}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={parse} style={{ flex: 1, background: C.solide + "22", color: C.solide, border: `1px solid ${C.solide}55`, borderRadius: 6, padding: "6px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-          Importer
-        </button>
-        <button onClick={() => { setOpen(false); setError(""); }} style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, padding: "6px 10px", color: C.dim, fontSize: 12, cursor: "pointer" }}>
-          Annuler
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* Extraction automatique depuis un copier-coller brut type MakeYourStats/Flashscore.
-   Motif vérifié plusieurs fois ce soir : chaque match = 1 ligne date (MM/AAAA),
-   2 lignes équipes, puis 8 nombres dans l'ordre :
-   [buts_dom, buts_ext, jaunes_dom, jaunes_ext, rouges_dom, rouges_ext, corners_dom, corners_ext] */
-function parseRawStatsBlock(text, teamName) {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  const stripRank = (s) => s.replace(/^\(\d+\)\s*/, "").trim().toLowerCase();
-  const target = stripRank(teamName || "");
-  const dateRe = /^\d{2}\/\d{4}$/;
-  const numRe = /^-?\d+(\.\d+)?$/;
-  const results = [];
-  const skipped = [];
-
-  let i = 0;
-  while (i < lines.length) {
-    if (dateRe.test(lines[i])) {
-      const team1 = lines[i + 1];
-      const team2 = lines[i + 2];
-      // on lit tous les nombres consécutifs après les 2 équipes (la longueur varie selon
-      // le nombre de stats affichées par le site), et on prend toujours les 2 DERNIERS
-      // comme corners : c'est systématiquement la dernière colonne, quel que soit le total.
-      let j = i + 3;
-      // ignore les lignes texte parasites (ex : "Inclus dans stats TàT") entre les
-      // noms d'équipe et le début des chiffres, sans dépasser le prochain bloc date
-      while (j < lines.length && !numRe.test(lines[j]) && !dateRe.test(lines[j])) j++;
-      const nums = [];
-      while (j < lines.length && numRe.test(lines[j])) {
-        nums.push(Number(lines[j]));
-        j++;
-      }
-      if (team1 && team2 && nums.length >= 4 && nums.length % 2 === 0) {
-        const cornersHome = nums[nums.length - 2];
-        const cornersAway = nums[nums.length - 1];
-        const t1 = stripRank(team1);
-        const t2 = stripRank(team2);
-        if (target && t1.includes(target)) {
-          results.push({ id: uid(), obtenus: String(cornersHome), concedes: String(cornersAway), lieu: "D" });
-        } else if (target && t2.includes(target)) {
-          results.push({ id: uid(), obtenus: String(cornersAway), concedes: String(cornersHome), lieu: "E" });
-        } else {
-          skipped.push(`${team1} vs ${team2}`);
-        }
-        i = j;
-        continue;
-      }
-    }
-    i += 1;
-  }
-  return { results, skipped };
-}
-
 /* Variante pour les confrontations directes : on connaît les 2 équipes précises,
    donc on assigne obtenusA/obtenusB au bon côté peu importe qui jouait à domicile
    ce jour-là (contrairement au domicile/extérieur fixe des profils saison). */
@@ -889,143 +781,6 @@ function parseTotalCornerBlock(raw, teamName) {
   return { results, skipped, halvesCount };
 }
 
-function RawExtract({ teamName, color, onImport }) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
-
-  const run = () => {
-    if (!teamName || !teamName.trim()) {
-      setError("Renseigne d'abord le nom de l'équipe ci-dessus (pour identifier la bonne ligne).");
-      return;
-    }
-    const { results, skipped } = parseRawStatsBlock(text, teamName);
-    if (!results.length) {
-      setError(`Aucun match reconnu pour "${teamName}" — vérifie que le nom correspond exactement à celui du tableau collé.`);
-      return;
-    }
-    onImport(results);
-    setInfo(`${results.length} match${results.length > 1 ? "s" : ""} importé${results.length > 1 ? "s" : ""}${skipped.length ? ` · ${skipped.length} ligne(s) ignorée(s)` : ""}. Vérifie le résultat ci-dessous avant de t'y fier.`);
-    setError("");
-    setText("");
-    setOpen(false);
-  };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} style={{ fontSize: 10.5, color, background: "transparent", border: `1px solid ${color}55`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", flexShrink: 0 }}>
-        Extraction auto
-      </button>
-    );
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, background: C.bg, border: `1px solid ${color}55`, borderRadius: 8, padding: 8, gridColumn: "1 / -1" }}>
-      <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.4 }}>
-        Colle tout le bloc copié depuis MakeYourStats/Flashscore (dates, équipes, chiffres, tel quel). L'app repère les
-        matchs de <b style={{ color: C.text }}>{teamName || "(équipe non renseignée)"}</b> et lit la colonne corners automatiquement.
-        <b style={{ color: C.fragile }}> Vérifie toujours le résultat</b> — c'est une lecture automatique, pas garantie infaillible.
-      </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Colle ici tout le tableau copié..." rows={8} style={{ ...inputStyle, resize: "vertical", fontSize: 12 }} />
-      {error && <div style={{ fontSize: 11, color: C.fragile }}>{error}</div>}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={run} style={{ flex: 1, background: C.solide + "22", color: C.solide, border: `1px solid ${C.solide}55`, borderRadius: 6, padding: "6px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-          Extraire
-        </button>
-        <button onClick={() => { setOpen(false); setError(""); }} style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, padding: "6px 10px", color: C.dim, fontSize: 12, cursor: "pointer" }}>
-          Annuler
-        </button>
-      </div>
-      {info && <div style={{ fontSize: 11, color: C.jouable }}>{info}</div>}
-    </div>
-  );
-}
-
-/* Extraction depuis un tableau FBref "Match Logs (Shooting)" copié-collé (colonnes
-   séparées par tabulations). On ne s'intéresse qu'à la colonne "Sh" (tirs) — position
-   fixe (12e colonne) d'après le format observé : Date, Temps, Comp, Rond, Jour, Lieu,
-   Résultat, GF, GA, Adversaire, Gls, Sh, SoT, SoT%, G/Sh, G/SoT, PK, PKatt, Rapport.
-   FBref liste du plus ancien (haut) au plus récent (bas) — l'inverse de notre
-   convention — donc on inverse le tableau obtenu avant de l'associer aux matchs. */
-function parseFBrefShotsColumn(text) {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  const values = [];
-  for (const line of lines) {
-    const cells = line.includes("\t") ? line.split("\t") : line.split(/ {2,}/);
-    if (cells.length < 12) continue;
-    const sh = parseInt(cells[11], 10);
-    if (!isNaN(sh)) values.push(sh);
-  }
-  return values.reverse(); // -> du plus récent au plus ancien, comme nos matchs
-}
-
-function FbrefShotsImport({ matches, setMatches, color }) {
-  const [open, setOpen] = useState(false);
-  const [pour, setPour] = useState("");
-  const [contre, setContre] = useState("");
-  const [msg, setMsg] = useState("");
-  const [msgType, setMsgType] = useState("info");
-
-  const run = () => {
-    const obt = parseFBrefShotsColumn(pour);
-    const conc = parseFBrefShotsColumn(contre);
-    if (!obt.length || !conc.length) {
-      setMsgType("error");
-      setMsg("Aucune valeur reconnue — vérifie que tu as bien collé les tableaux tel quel (avec les tabulations).");
-      return;
-    }
-    if (obt.length !== conc.length) {
-      setMsgType("error");
-      setMsg(`Nombre de lignes différent entre "Pour" (${obt.length}) et "Contre" (${conc.length}) — vérifie que ce sont bien les mêmes matchs des deux côtés.`);
-      return;
-    }
-    if (obt.length !== matches.length) {
-      setMsgType("error");
-      setMsg(`${obt.length} match${obt.length > 1 ? "s" : ""} dans le collage FBref, mais ${matches.length} dans ton historique corners — ils doivent correspondre exactement (même matchs, même ordre) pour fusionner sans risque. Rien n'a été modifié.`);
-      return;
-    }
-    const next = matches.map((m, i) => ({ ...m, tirsObtenus: String(obt[i]), tirsConcedes: String(conc[i]) }));
-    setMatches(next);
-    setMsgType("ok");
-    setMsg(`${obt.length} match${obt.length > 1 ? "s" : ""} mis à jour avec les tirs. Vérifie quelques lignes avant de t'y fier.`);
-    setPour("");
-    setContre("");
-  };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} style={{ fontSize: 10.5, color, background: "transparent", border: `1px solid ${color}55`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
-        Importer tirs (FBref)
-      </button>
-    );
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, background: C.bg, border: `1px solid ${color}55`, borderRadius: 8, padding: 8 }}>
-      <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.4 }}>
-        Colle le tableau <b style={{ color: C.text }}>"Pour"</b> (tirs obtenus) puis <b style={{ color: C.text }}>"Contre"</b> (tirs concédés),
-        copiés tels quels depuis FBref (onglet Shooting). Les <b style={{ color: C.fragile }}>{matches.length} match{matches.length > 1 ? "s" : ""}
-        de ton historique corners</b> doivent correspondre exactement à ce que tu colles (mêmes matchs, même ordre) — sinon
-        rien n'est modifié.
-      </div>
-      <Field label={`"Pour" (tirs obtenus)`}>
-        <textarea value={pour} onChange={(e) => setPour(e.target.value)} placeholder="Colle le tableau Pour ici..." rows={4} style={{ ...inputStyle, resize: "vertical", fontSize: 11 }} />
-      </Field>
-      <Field label={`"Contre" (tirs concédés)`}>
-        <textarea value={contre} onChange={(e) => setContre(e.target.value)} placeholder="Colle le tableau Contre ici..." rows={4} style={{ ...inputStyle, resize: "vertical", fontSize: 11 }} />
-      </Field>
-      {msg && <div style={{ fontSize: 11, color: msgType === "error" ? C.fragile : msgType === "ok" ? C.solide : C.dim }}>{msg}</div>}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={run} style={{ flex: 1, background: C.solide + "22", color: C.solide, border: `1px solid ${C.solide}55`, borderRadius: 6, padding: "6px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-          Fusionner
-        </button>
-        <button onClick={() => { setOpen(false); setMsg(""); }} style={{ background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, padding: "6px 10px", color: C.dim, fontSize: 12, cursor: "pointer" }}>
-          Fermer
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /* Les dates extraites de TotalCorner sont au format "MM/JJ", sans année (l'année n'est
    jamais affichée sur le site). On la déduit à partir de l'ordre chronologique : les
    résultats sont toujours du plus récent au plus ancien, donc si le mois d'un match est
@@ -1217,10 +972,8 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <div style={{ fontSize: 10, color: C.faint, fontFamily: FONT_MONO }}>du plus récent (haut) au plus ancien (bas)</div>
         <div style={{ display: "flex", gap: 6 }}>
-          <RawExtract teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} />
           <RawExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} />
           <PdfExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} />
-          <BulkPaste color={color} onImport={(parsed) => setMatches([...matches, ...parsed])} />
           {matches.length > 1 && (
             <button
               onClick={() => setMatches([...matches].reverse())}
@@ -1270,7 +1023,6 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
           </div>
         </div>
       )}
-      {useAdvanced && <FbrefShotsImport matches={matches} setMatches={setMatches} color={color} />}
       {matches.map((m, i) => (
         <div key={m.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
