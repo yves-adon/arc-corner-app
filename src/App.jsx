@@ -810,6 +810,15 @@ function parseTotalCornerBlock(raw, teamName) {
    vient de passer une frontière d'année (ex. de janvier on retombe sur décembre de
    l'année précédente) — on décrémente alors l'année déduite. Fiable tant que la liste
    ne saute pas une année entière d'un coup (jamais le cas ici, page par page). */
+/* Le nom de l'équipe figure toujours en haut de la page TotalCorner, dans le titre
+   "{Équipe} Stats et résultats des corners" — on peut donc le détecter automatiquement
+   plutôt que d'obliger à le taper à la main (certains noms contiennent des caractères
+   peu pratiques à saisir sur un clavier mobile, ex. des idéogrammes). */
+function detectTeamNameFromText(text) {
+  const m = text.match(/([\p{L}][\p{L}\d\s\-'\u2019.]*?)\s+Stats et résultats des corners/u);
+  return m ? m[1].trim() : "";
+}
+
 function inferAbsoluteDates(results, today = new Date()) {
   let year = today.getFullYear();
   let prevMonth = today.getMonth() + 1;
@@ -824,29 +833,58 @@ function inferAbsoluteDates(results, today = new Date()) {
   });
 }
 
-function RawExtractTotalCorner({ teamName, color, onImport }) {
+function RawExtractTotalCorner({ teamName, color, onImport, onTeamNameDetected }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
   const run = () => {
-    if (!teamName || !teamName.trim()) {
-      setError("Renseigne d'abord le nom de l'équipe ci-dessus (pour identifier la bonne ligne).");
-      return;
+    const detectedName = detectTeamNameFromText(text);
+    const typedName = (teamName || "").trim();
+    let usedName = typedName;
+    let results = [];
+    let skipped = [];
+    let halvesCount = 0;
+    let usedFallback = false;
+
+    if (typedName) {
+      ({ results, skipped, halvesCount } = parseTotalCornerBlock(text, typedName));
     }
-    const { results, skipped, halvesCount } = parseTotalCornerBlock(text, teamName);
+    if (!results.length && detectedName && detectedName.toLowerCase() !== typedName.toLowerCase()) {
+      const retry = parseTotalCornerBlock(text, detectedName);
+      if (retry.results.length) {
+        ({ results, skipped, halvesCount } = retry);
+        usedName = detectedName;
+        usedFallback = true;
+      }
+    }
+    if (!results.length && !typedName && detectedName) {
+      const retry = parseTotalCornerBlock(text, detectedName);
+      results = retry.results;
+      skipped = retry.skipped;
+      halvesCount = retry.halvesCount;
+      usedName = detectedName;
+      usedFallback = true;
+    }
+
     if (!results.length) {
-      setError(`Aucun match reconnu pour "${teamName}" — soit le nom ne correspond pas, soit le copier-coller n'a pas gardé les liens nécessaires au repérage.`);
+      setError(
+        typedName
+          ? `Aucun match reconnu ni pour "${typedName}"${detectedName ? ` ni pour "${detectedName}" (détecté dans le texte)` : ""} — soit le nom ne correspond pas, soit le copier-coller n'a pas gardé les liens nécessaires au repérage.`
+          : "Aucun nom d'équipe détecté dans ce texte et aucun nom tapé — renseigne le nom de l'équipe ci-dessus."
+      );
       return;
     }
     onImport(results);
+    if (usedFallback && onTeamNameDetected) onTeamNameDetected(usedName);
     const halvesMsg = halvesCount === results.length
       ? " · mi-temps récupérées pour tous"
       : halvesCount > 0
       ? ` · mi-temps récupérées pour ${halvesCount}/${results.length}`
       : " · aucune mi-temps détectée (recolle via Xodo pour les récupérer)";
-    setInfo(`${results.length} match${results.length > 1 ? "s" : ""} importé${results.length > 1 ? "s" : ""} (corners + att. dangereuses)${halvesMsg}${skipped.length ? ` · ${skipped.length} ligne(s) ignorée(s)` : ""}. Vérifie le résultat avant de t'y fier.`);
+    const nameMsg = usedFallback ? ` · nom d'équipe détecté automatiquement : "${usedName}"` : "";
+    setInfo(`${results.length} match${results.length > 1 ? "s" : ""} importé${results.length > 1 ? "s" : ""} (corners + att. dangereuses)${halvesMsg}${nameMsg}${skipped.length ? ` · ${skipped.length} ligne(s) ignorée(s)` : ""}. Vérifie le résultat avant de t'y fier.`);
     setError("");
     setText("");
     setOpen(false);
@@ -863,8 +901,10 @@ function RawExtractTotalCorner({ teamName, color, onImport }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 6, background: C.bg, border: `1px solid ${color}55`, borderRadius: 8, padding: 8, gridColumn: "1 / -1" }}>
       <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.4 }}>
         Colle le texte copié depuis la page stats corners de l'équipe sur TotalCorner. Repère les matchs de{" "}
-        <b style={{ color: C.text }}>{teamName || "(équipe non renseignée)"}</b> et lit corners <b>et</b> attaques
-        dangereuses en même temps. <b style={{ color: C.fragile }}>Nécessite que le copier-coller conserve les liens du
+        <b style={{ color: C.text }}>{teamName || "l'équipe détectée automatiquement dans le texte"}</b> et lit corners{" "}
+        <b>et</b> attaques dangereuses en même temps — le nom de l'équipe n'est plus obligatoire, il est lu directement
+        dans le titre du texte collé si le champ ci-dessus est vide ou ne correspond à rien.{" "}
+        <b style={{ color: C.fragile }}>Nécessite que le copier-coller conserve les liens du
         site</b> (ça ne marche pas si tu passes par une capture d'écran/OCR) — <b style={{ color: C.fragile }}>vérifie
         toujours le résultat</b>.
       </div>
@@ -883,7 +923,7 @@ function RawExtractTotalCorner({ teamName, color, onImport }) {
   );
 }
 
-function PdfExtractTotalCorner({ teamName, color, onImport }) {
+function PdfExtractTotalCorner({ teamName, color, onImport, onTeamNameDetected }) {
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [dateFrom, setDateFrom] = useState("");
@@ -895,10 +935,6 @@ function PdfExtractTotalCorner({ teamName, color, onImport }) {
   const inputId = useMemo(() => `pdf-import-${uid()}`, []);
 
   const run = async () => {
-    if (!teamName || !teamName.trim()) {
-      setError("Renseigne d'abord le nom de l'équipe ci-dessus (pour identifier la bonne ligne).");
-      return;
-    }
     if (!file) {
       setError("Choisis d'abord un fichier PDF.");
       return;
@@ -908,9 +944,44 @@ function PdfExtractTotalCorner({ teamName, color, onImport }) {
     setInfo("");
     try {
       const text = await extractPdfText(file, (i, total) => setProgress(`page ${i}/${total}`));
-      const { results, skipped, halvesCount } = parseTotalCornerBlock(text, teamName);
+      const detectedName = detectTeamNameFromText(text);
+      const typedName = (teamName || "").trim();
+
+      // Le nom de l'équipe figure dans le PDF lui-même — on l'utilise en priorité s'il
+      // n'y a rien de tapé, et en repli automatique si ce qui est tapé ne matche rien
+      // (utile pour les noms avec des caractères peu pratiques à saisir).
+      let usedName = typedName;
+      let results = [];
+      let skipped = [];
+      let halvesCount = 0;
+      let usedFallback = false;
+
+      if (typedName) {
+        ({ results, skipped, halvesCount } = parseTotalCornerBlock(text, typedName));
+      }
+      if (!results.length && detectedName && detectedName.toLowerCase() !== typedName.toLowerCase()) {
+        const retry = parseTotalCornerBlock(text, detectedName);
+        if (retry.results.length) {
+          ({ results, skipped, halvesCount } = retry);
+          usedName = detectedName;
+          usedFallback = true;
+        }
+      }
+      if (!results.length && !typedName && detectedName) {
+        const retry = parseTotalCornerBlock(text, detectedName);
+        results = retry.results;
+        skipped = retry.skipped;
+        halvesCount = retry.halvesCount;
+        usedName = detectedName;
+        usedFallback = true;
+      }
+
       if (!results.length) {
-        setError(`Aucun match reconnu pour "${teamName}" dans ce PDF — vérifie que c'est bien la page stats corners de la bonne équipe.`);
+        setError(
+          typedName
+            ? `Aucun match reconnu ni pour "${typedName}"${detectedName ? ` ni pour "${detectedName}" (détecté dans le PDF)` : ""} — vérifie que c'est bien la page stats corners de la bonne équipe.`
+            : "Aucun nom d'équipe détecté dans ce PDF et aucun nom tapé — renseigne le nom de l'équipe ci-dessus."
+        );
         setBusy(false);
         return;
       }
@@ -930,9 +1001,11 @@ function PdfExtractTotalCorner({ teamName, color, onImport }) {
         }
       }
       onImport(finalResults);
+      if (usedFallback && onTeamNameDetected) onTeamNameDetected(usedName);
       const halvesMsg = halvesCount === results.length ? " · mi-temps récupérées pour tous" : halvesCount > 0 ? ` · mi-temps récupérées pour ${halvesCount}/${results.length}` : "";
       const rangeMsg = dateFrom || dateTo ? ` (filtré sur l'intervalle demandé, ${results.length} trouvés au total dans le PDF)` : "";
-      setInfo(`${finalResults.length} match${finalResults.length > 1 ? "s" : ""} importé${finalResults.length > 1 ? "s" : ""}${rangeMsg}${halvesMsg}${skipped.length ? ` · ${skipped.length} ligne(s) ignorée(s)` : ""}. Vérifie le résultat avant de t'y fier.`);
+      const nameMsg = usedFallback ? ` · nom d'équipe détecté automatiquement : "${usedName}"` : "";
+      setInfo(`${finalResults.length} match${finalResults.length > 1 ? "s" : ""} importé${finalResults.length > 1 ? "s" : ""}${rangeMsg}${halvesMsg}${nameMsg}${skipped.length ? ` · ${skipped.length} ligne(s) ignorée(s)` : ""}. Vérifie le résultat avant de t'y fier.`);
       setFile(null);
       setOpen(false);
     } catch (e) {
@@ -953,8 +1026,10 @@ function PdfExtractTotalCorner({ teamName, color, onImport }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 6, background: C.bg, border: `1px solid ${color}55`, borderRadius: 8, padding: 8, gridColumn: "1 / -1" }}>
       <div style={{ fontSize: 10.5, color: C.dim, lineHeight: 1.4 }}>
         Choisis directement le PDF exporté depuis la page stats corners de TotalCorner (menu Imprimer du navigateur →
-        « Enregistrer en PDF ») pour <b style={{ color: C.text }}>{teamName || "(équipe non renseignée)"}</b> — plus
-        besoin de passer par Xodo. Optionnel : limite à un intervalle de dates précis (sinon tout le PDF est traité).{" "}
+        « Enregistrer en PDF ») pour <b style={{ color: C.text }}>{teamName || "l'équipe détectée automatiquement dans le PDF"}</b> —
+        plus besoin de passer par Xodo. Le nom de l'équipe n'est plus obligatoire : il est lu directement dans le titre
+        du PDF si le champ ci-dessus est vide ou ne correspond à rien. Optionnel : limite à un intervalle de dates
+        précis (sinon tout le PDF est traité).{" "}
         <b style={{ color: C.fragile }}>Vérifie toujours le résultat.</b>
       </div>
       <input id={inputId} type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files && e.target.files[0])} style={{ fontSize: 11, color: C.dim }} />
@@ -978,7 +1053,7 @@ function PdfExtractTotalCorner({ teamName, color, onImport }) {
   );
 }
 
-function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, onToggleAdvanced, excludedLigues, onToggleLigue }) {
+function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, onToggleAdvanced, excludedLigues, onToggleLigue, onTeamNameDetected }) {
   const update = (id, next) => setMatches(matches.map((m) => (m.id === id ? next : m)));
   const remove = (id) => setMatches(matches.filter((m) => m.id !== id));
   // liste dynamique des compétitions présentes dans CET historique — comme le filtre de
@@ -994,8 +1069,8 @@ function MatchHistoryRows({ matches, setMatches, color, teamName, useAdvanced, o
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <div style={{ fontSize: 10, color: C.faint, fontFamily: FONT_MONO }}>du plus récent (haut) au plus ancien (bas)</div>
         <div style={{ display: "flex", gap: 6 }}>
-          <RawExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} />
-          <PdfExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} />
+          <RawExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} onTeamNameDetected={onTeamNameDetected} />
+          <PdfExtractTotalCorner teamName={teamName} color={color} onImport={(parsed) => setMatches([...parsed, ...matches])} onTeamNameDetected={onTeamNameDetected} />
           {matches.length > 1 && (
             <button
               onClick={() => setMatches([...matches].reverse())}
@@ -1213,6 +1288,7 @@ function TeamProfileForm({ team, setTeam, color, label }) {
             onToggleAdvanced={() => setTeam({ ...team, useAdvanced: !team.useAdvanced })}
             excludedLigues={excludedLigues}
             onToggleLigue={toggleLigue}
+            onTeamNameDetected={(nom) => setTeam({ ...team, nom })}
           />
           {stats ? (
             <div style={{ background: C.bg, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontFamily: FONT_MONO, fontSize: 11.5, color: C.dim, display: "flex", flexDirection: "column", gap: 3 }}>
