@@ -97,6 +97,29 @@ function computeVolumeSignal(series, seuilVolume = 6.0, seuilVolatilite = 1.4) {
   if (!series || series.ewmaObtenus === null || series.ewmaConcedes === null) return null;
   return volumeSignalFromValues(series.ewmaObtenus + series.ewmaConcedes, series.volatilite, seuilVolume, seuilVolatilite);
 }
+/* Badge de "forme" — pensé pour les buts (mais réutilisable ailleurs) : contrairement au
+   signal volume des corners ci-dessus (seuil absolu, ex. ≥6.0), celui-ci utilise le RATIO
+   EWMA/volatilité, comme le verdict Solide/Jouable/Fragile déjà utilisé dans le
+   Comparateur. Une équipe irrégulière (grosse volatilité) a besoin d'un EWMA plus extrême
+   pour être jugée "en forme" qu'une équipe régulière — logique vu qu'un seul match à gros
+   score peut à lui seul faire bouger l'EWMA de +1, sans que ce soit une vraie tendance. */
+function computeFormLabel(series) {
+  if (!series || series.ewma === null || series.ewma === undefined) return null;
+  const vol = series.volatilite && series.volatilite > 0 ? series.volatilite : Math.sqrt(Math.max(Math.abs(series.ewma), 0.1));
+  const ratio = Math.abs(series.ewma) / vol;
+  let label, color;
+  if (ratio < 0.5) {
+    label = "Neutre";
+    color = C.faint;
+  } else if (series.ewma > 0) {
+    label = ratio >= 1 ? "Bonne forme" : "En forme";
+    color = ratio >= 1 ? C.solide : C.jouable;
+  } else {
+    label = ratio >= 1 ? "En perdition" : "Difficultés";
+    color = ratio >= 1 ? C.fragile : C.jouable;
+  }
+  return { label, ratio, color };
+}
 /* Synthèse "quelle équipe + quelle mi-temps" pour un handicap corners — combine :
    - la projection croisée déjà utilisée ailleurs (projA vs projB) pour désigner
      l'équipe favorite et évaluer la confiance (marge / volatilité, via computeVerdict,
@@ -641,7 +664,7 @@ function parseTotalCornerBlock(raw, teamName) {
     // collé au tout premier match d'un texte) peuvent se retrouver devant le vrai nom
     // une fois les lignes regroupées — on les retire, en boucle au cas où plusieurs
     // se suivent
-    const NOISE_PREFIXES = ["Cotes", "Stats", "En direct", "Événements en direct", "Analyse"];
+    const NOISE_PREFIXES = ["Cotes", "Stats", "En direct", "Événements en direct", "Attaque dangereuse", "Attaque", "Analyse"];
     let stripped = true;
     while (stripped) {
       stripped = false;
@@ -815,8 +838,11 @@ function parseTotalCornerBlock(raw, teamName) {
    plutôt que d'obliger à le taper à la main (certains noms contiennent des caractères
    peu pratiques à saisir sur un clavier mobile, ex. des idéogrammes). */
 function detectTeamNameFromText(text) {
-  const m = text.match(/([\p{L}][\p{L}\d\s\-'\u2019.]*?)\s+Stats et résultats des corners/u);
-  return m ? m[1].trim() : "";
+  const idx = text.indexOf("Stats et résultats des corners");
+  if (idx === -1) return "";
+  const before = text.slice(Math.max(0, idx - 120), idx);
+  const nm = before.match(/([A-ZÀ-ÖØ-Þ\p{Script=Han}][\p{L}\d\s\-'\u2019.]*)$/u);
+  return nm ? nm[1].trim() : "";
 }
 
 function inferAbsoluteDates(results, today = new Date()) {
@@ -1419,6 +1445,34 @@ function TeamProfileForm({ team, setTeam, color, label }) {
                         )}
                         <div style={{ fontSize: 9.5, color: C.faint, fontStyle: "italic" }}>
                           basé sur l'historique propre de {team.nom || "l'équipe"} uniquement (tous adversaires confondus) — le Comparateur affine ce signal en croisant avec l'adversaire du duel
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {stats.butsSeries && (
+                <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 2, paddingTop: 5 }}>
+                  <div style={{ fontSize: 10, color: C.faint, marginBottom: 2 }}>buts — match complet (optionnel)</div>
+                  <div>
+                    <b style={{ color: C.text }}>{stats.butsSeries.moyObtenus.toFixed(2)}</b>/
+                    <b style={{ color: C.text }}>{stats.butsSeries.moyConcedes.toFixed(2)}</b> · part{" "}
+                    {stats.butsSeries.part.toFixed(0)}% · EWMA {stats.butsSeries.ewma >= 0 ? "+" : ""}
+                    {stats.butsSeries.ewma.toFixed(2)} · vol ±{stats.butsSeries.volatilite.toFixed(2)}{" "}
+                    <VolBadge vol={stats.butsSeries.volatilite} volSource="historique" />
+                  </div>
+                  {(() => {
+                    const form = stats.butsSeries.n >= 3 ? computeFormLabel(stats.butsSeries) : null;
+                    if (!form) return null;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <Pill color={form.color}>{form.label}</Pill>
+                          <span style={{ color: C.faint, fontSize: 10 }}>ratio {form.ratio.toFixed(2)}× (EWMA / volatilité)</span>
+                        </div>
+                        <div style={{ fontSize: 9.5, color: C.faint, fontStyle: "italic" }}>
+                          contrairement au badge volume des corners (seuil fixe), ce badge s'appuie sur le ratio propre
+                          à {team.nom || "l'équipe"} — plus adapté aux buts, plus rares et plus volatils par match que les corners
                         </div>
                       </div>
                     );
