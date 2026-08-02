@@ -1780,6 +1780,11 @@ function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, t
               <span style={{ color: C.faint, fontSize: 10 }}>ratio {formB.ratio.toFixed(2)}×</span>
             </div>
           )}
+          <div style={{ fontSize: 9.5, color: C.faint, fontStyle: "italic", marginTop: 2 }}>
+            même principe que dans le profil solo : contrairement au badge volume des corners (seuil fixe), ce badge
+            s'appuie sur le ratio propre à chaque équipe — plus adapté aux buts, plus rares et plus volatils par
+            match que les corners
+          </div>
         </div>
       )}
     </div>
