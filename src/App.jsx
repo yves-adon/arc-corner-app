@@ -648,9 +648,22 @@ function parseTotalCornerBlock(raw, teamName) {
   // MAJUSCULE/idéogramme de départ plutôt que par un simple découpage sur les espaces.
   // Le nom BRUT est conservé (pas juste une classification L/C/A) pour permettre un
   // filtre à cocher dynamique, comme celui de TotalCorner lui-même.
+  // fragments connus de l'en-tête du tableau (répété en haut de chaque page), à retirer
+  // AVANT toute analyse — bien plus robuste qu'un nettoyage mot par mot après coup, qui
+  // peine à suivre quand l'en-tête se recompose différemment selon les sauts de ligne
+  const HEADER_NOISE_RE =
+    /Ligue\s*Heure\s*Domicile\s*Score\s*Extérieur\s*Handicap\s*Corner|Ligne\s*de\s*corners|Corner\s*O\/U|Total\s*buts|Buts\s*O\/U|Attaque\s*dangereuse|Événements\s*en\s*direct|Analyse|\bO\/U\b/gi;
+
   const detectLeagueName = (markerStart) => {
-    const before = raw.slice(Math.max(0, markerStart - 160), markerStart);
-    const lines = before.split("\n").map((s) => s.trim()).filter(Boolean);
+    const windowSize = 400;
+    const cut = Math.max(0, markerStart - windowSize);
+    const before = raw.slice(cut, markerStart).replace(HEADER_NOISE_RE, " ");
+    let lines = before.split("\n").map((s) => s.trim()).filter(Boolean);
+    // si on a effectivement tronqué (cut > 0), la toute première ligne peut être coupée
+    // en plein mot — une lettre isolée en début de ligne suffit à passer pour un faux
+    // début de nom valide, donc on l'écarte par sécurité ; sans troncature réelle (tout
+    // début de document), on la garde
+    if (cut > 0 && lines.length > 1) lines = lines.slice(1);
     // on regroupe les 3 dernières lignes (le nom peut être coupé sur plusieurs lignes
     // en extraction PDF) puis on ne garde que le suffixe qui ressemble à un nom —
     // lettres/chiffres/espaces/tirets uniquement (les chiffres sont nécessaires pour
@@ -660,22 +673,41 @@ function parseTotalCornerBlock(raw, teamName) {
     const nm = joined.match(/([A-ZÀ-ÖØ-Þ\p{Script=Han}][\p{L}\d\s\-'\u2019.]*)$/u);
     if (!nm) return "";
     let name = nm[1].trim();
-    // certains mots-outils (liens "Cotes"/"Stats"/"En direct", ou l'en-tête du tableau
-    // collé au tout premier match d'un texte) peuvent se retrouver devant le vrai nom
-    // une fois les lignes regroupées — on les retire, en boucle au cas où plusieurs
-    // se suivent
-    const NOISE_PREFIXES = ["Cotes", "Stats", "En direct", "Événements en direct", "Attaque dangereuse", "Attaque", "Analyse"];
+    // filet de sécurité : mots-outils isolés (liens) qui peuvent encore se retrouver
+    // devant le vrai nom une fois les lignes regroupées
+    const NOISE_PREFIXES = ["Cotes", "Stats", "En direct"];
     let stripped = true;
     while (stripped) {
       stripped = false;
       for (const noise of NOISE_PREFIXES) {
-        if (name.startsWith(noise + " ")) {
+        if (name === noise) {
+          name = "";
+          stripped = true;
+        } else if (name.startsWith(noise + " ")) {
           name = name.slice(noise.length).trim();
           stripped = true;
         }
       }
     }
-    return name;
+    return name.trim();
+  };
+
+  // Si aucun vrai nom de compétition n'est trouvé pour un match (ex. la page ne le
+  // réaffiche pas quand elle enchaîne sur la même compétition que la page précédente,
+  // seul l'en-tête du tableau se répète), on réutilise le dernier nom trouvé — beaucoup
+  // plus fiable que de laisser un résidu d'en-tête ("Événements en direct" etc.) ou un
+  // champ vide, puisque les matchs consécutifs appartiennent très souvent à la même
+  // compétition.
+  let lastKnownLigue = "";
+  const resolveLigue = (markerStart) => {
+    const detected = detectLeagueName(markerStart);
+    // un nom de compétition plausible fait au moins 3 caractères — en dessous, c'est
+    // presque certainement un résidu parasite (ex. une lettre isolée), pas un vrai nom
+    if (detected && detected.length >= 3) {
+      lastKnownLigue = detected;
+      return detected;
+    }
+    return lastKnownLigue;
   };
 
   const firstDate = (block) => {
@@ -761,7 +793,7 @@ function parseTotalCornerBlock(raw, teamName) {
         corners2MTConcedes: "",
         butsObtenus: butsHome !== null ? String(isHome ? butsHome : butsAway) : "",
         butsConcedes: butsHome !== null ? String(isHome ? butsAway : butsHome) : "",
-        ligue: detectLeagueName(blockMarkerStarts[bi]),
+        ligue: resolveLigue(blockMarkerStarts[bi]),
         date: firstDate(block) === "date inconnue" ? "" : firstDate(block),
       };
       if (inlineHalfFound) {
@@ -1247,7 +1279,7 @@ function VolBadge({ vol, volSource }) {
 }
 
 function TeamProfileForm({ team, setTeam, color, label }) {
-  const setMatches = (matches) => setTeam({ ...team, matches });
+  const setMatches = (matches) => setTeam((prev) => ({ ...prev, matches }));
   // filtre compétition : appliqué UNIQUEMENT au calcul, la liste des matchs reste
   // visible/éditable en entier quel que soit le filtre choisi
   const excludedLigues = team.excludedLigues || [];
@@ -1314,7 +1346,7 @@ function TeamProfileForm({ team, setTeam, color, label }) {
             onToggleAdvanced={() => setTeam({ ...team, useAdvanced: !team.useAdvanced })}
             excludedLigues={excludedLigues}
             onToggleLigue={toggleLigue}
-            onTeamNameDetected={(nom) => setTeam({ ...team, nom })}
+            onTeamNameDetected={(nom) => setTeam((prev) => ({ ...prev, nom }))}
           />
           {stats ? (
             <div style={{ background: C.bg, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontFamily: FONT_MONO, fontSize: 11.5, color: C.dim, display: "flex", flexDirection: "column", gap: 3 }}>
