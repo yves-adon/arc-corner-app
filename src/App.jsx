@@ -1431,7 +1431,7 @@ function TeamProfileForm({ team, setTeam, color, label }) {
               )}
               {(stats.mt1Series || stats.mt2Series) && (
                 <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 2, paddingTop: 5 }}>
-                  <div style={{ fontSize: 10, color: C.faint, marginBottom: 2 }}>corners par mi-temps (optionnel)</div>
+                  <div style={{ fontSize: 10, color: C.faint, marginBottom: 2 }}>corners par mi-temps (optionnel) · tous lieux confondus</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                     {stats.mt1Series && (
                       <span>
@@ -1485,7 +1485,7 @@ function TeamProfileForm({ team, setTeam, color, label }) {
               )}
               {stats.butsSeries && (
                 <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 2, paddingTop: 5 }}>
-                  <div style={{ fontSize: 10, color: C.faint, marginBottom: 2 }}>buts — match complet (optionnel)</div>
+                  <div style={{ fontSize: 10, color: C.faint, marginBottom: 2 }}>buts — match complet (optionnel) · tous lieux confondus</div>
                   <div>
                     <b style={{ color: C.text }}>{stats.butsSeries.moyObtenus.toFixed(2)}</b>/
                     <b style={{ color: C.text }}>{stats.butsSeries.moyConcedes.toFixed(2)}</b> · part{" "}
@@ -1676,7 +1676,7 @@ function MiTempsRecommendation({ recMT1, recMT2, teamAName, teamBName, matchLabe
    attaques dangereuses — entièrement optionnel, n'apparaît que si les deux équipes ont
    assez de données saisies. Contexte domicile/extérieur déjà pris en compte puisque
    seriesA/seriesB viennent de pickVenueStats, comme pour les corners. */
-function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, teamAName, teamBName, showHandicapSignal = false, showRatioVerdict = false }) {
+function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, teamAName, teamBName, showHandicapSignal = false, showRatioVerdict = false, showFormLabels = false }) {
   if (!seriesA || !seriesB) return null;
   const proj = projection(seriesA.moyObtenus, seriesB.moyConcedes, seriesB.moyObtenus, seriesA.moyConcedes);
   const volCombined = seriesA.volatilite || seriesB.volatilite ? Math.sqrt(seriesA.volatilite ** 2 + seriesB.volatilite ** 2) : null;
@@ -1690,6 +1690,11 @@ function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, t
   // aux corners)
   const ratioVerdict = showRatioVerdict ? computeVerdict({ moyenne: proj.projA, ligne: proj.projB, volatilite: volCombined }) : null;
   const ratioFavori = ratioVerdict ? (ratioVerdict.sens === "Over" ? teamAName || "Équipe A" : teamBName || "Équipe B") : null;
+  // forme individuelle de chaque équipe (Bonne forme/En forme/Neutre/Difficultés/En
+  // perdition) — indépendant du duel, contrairement au verdict ci-dessus qui compare
+  // les deux équipes entre elles
+  const formA = showFormLabels ? computeFormLabel(seriesA) : null;
+  const formB = showFormLabels ? computeFormLabel(seriesB) : null;
 
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1755,6 +1760,26 @@ function SecondaryStatPanel({ label, unit, seriesA, seriesB, sourceA, sourceB, t
           <span style={{ color: C.faint, fontSize: 10 }}>
             {ratioFavori} favori · marge {ratioVerdict.marge.toFixed(2)} · ratio {ratioVerdict.ratio.toFixed(2)}×
           </span>
+        </div>
+      )}
+
+      {(formA || formB) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, borderTop: `1px solid ${C.line}`, paddingTop: 8 }}>
+          <span style={{ fontSize: 10, color: C.faint }}>forme individuelle (indépendante du duel) :</span>
+          {formA && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: C.teamA, minWidth: 70 }}>{teamAName || "Équipe A"}</span>
+              <Pill color={formA.color}>{formA.label}</Pill>
+              <span style={{ color: C.faint, fontSize: 10 }}>ratio {formA.ratio.toFixed(2)}×</span>
+            </div>
+          )}
+          {formB && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: C.teamB, minWidth: 70 }}>{teamBName || "Équipe B"}</span>
+              <Pill color={formB.color}>{formB.label}</Pill>
+              <span style={{ color: C.faint, fontSize: 10 }}>ratio {formB.ratio.toFixed(2)}×</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2140,6 +2165,11 @@ function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, i
   };
   const effA = pickVenueStats(filterMatches(teamA), "D");
   const effB = pickVenueStats(filterMatches(teamB), "E");
+  // stats tous lieux confondus (pas de filtre domicile/extérieur) — pour le panneau
+  // "Buts (match complet) — tous lieux confondus", en complément du panneau existant
+  // qui croise domicile (équipe A) / extérieur (équipe B)
+  const statsATotal = computeHistoryStats(filterMatches(teamA).matches, 0.25, !!teamA.useAdvanced) || {};
+  const statsBTotal = computeHistoryStats(filterMatches(teamB).matches, 0.25, !!teamB.useAdvanced) || {};
 
   const proj = projection(num(effA.obtenus), num(effB.concedes), num(effB.obtenus), num(effA.concedes));
   const matchLabel = `${teamA.nom || "Équipe A"} vs ${teamB.nom || "Équipe B"}`;
@@ -2381,6 +2411,20 @@ function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, i
         teamAName={teamA.nom}
         teamBName={teamB.nom}
         showRatioVerdict
+        showFormLabels
+      />
+
+      <SecondaryStatPanel
+        label="Buts (match complet) — tous lieux confondus"
+        unit="buts"
+        seriesA={statsATotal.butsSeries}
+        seriesB={statsBTotal.butsSeries}
+        sourceA="tous lieux confondus"
+        sourceB="tous lieux confondus"
+        teamAName={teamA.nom}
+        teamBName={teamB.nom}
+        showRatioVerdict
+        showFormLabels
       />
 
       <H2hSection h2h={h2h} setH2h={setH2h} teamAName={teamA.nom} teamBName={teamB.nom} seasonProj={proj.total} />
