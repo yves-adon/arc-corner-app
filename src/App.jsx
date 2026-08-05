@@ -7,6 +7,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 import { extractPdfText } from "./lib/pdfExtract.js";
+import { fetchClubElo, computeEloMatchup } from "./lib/clubElo.js";
 
 /* ---------------------------------------------------------------
    THEME
@@ -1609,6 +1610,125 @@ function LectureCroisee({ teamA, teamB, proj }) {
   );
 }
 
+/* Force relative Elo (ClubElo) — marché 1X2, complémentaire aux corners/buts déjà
+   couverts. Contrairement au reste de l'app (bâti uniquement sur l'historique propre
+   de chaque équipe), l'Elo intègre indirectement TOUTE la pyramide du football
+   européen via les matchs de coupes d'Europe qui relient les ligues entre elles —
+   c'est ce qui permet de comparer deux équipes qui ne jouent jamais dans la même
+   ligue (ex. Bodø/Glimt vs Celtic). Recherche manuelle (pas automatique) pour éviter
+   de spammer l'API à chaque rendu, et les noms sont éditables car l'orthographe
+   ClubElo peut différer de celle utilisée sur TotalCorner. */
+function EloPanel({ teamAName, teamBName }) {
+  const [nameA, setNameA] = useState(teamAName || "");
+  const [nameB, setNameB] = useState(teamBName || "");
+  const [eloA, setEloA] = useState(null);
+  const [eloB, setEloB] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [searched, setSearched] = useState(false);
+
+  useEffect(() => {
+    setNameA(teamAName || "");
+    setEloA(null);
+    setSearched(false);
+  }, [teamAName]);
+  useEffect(() => {
+    setNameB(teamBName || "");
+    setEloB(null);
+    setSearched(false);
+  }, [teamBName]);
+
+  const run = async () => {
+    if (!nameA.trim() || !nameB.trim()) {
+      setError("Renseigne le nom des deux équipes (celui utilisé par ClubElo, pas forcément identique à TotalCorner).");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const [a, b] = await Promise.all([fetchClubElo(nameA), fetchClubElo(nameB)]);
+      if (!a || !b) {
+        setError(
+          `Club introuvable sur ClubElo : ${!a ? `"${nameA}"` : ""}${!a && !b ? " et " : ""}${!b ? `"${nameB}"` : ""} — essaie une orthographe différente (ex. "Bodo/Glimt", "Celtic").`
+        );
+        setEloA(a);
+        setEloB(b);
+        setBusy(false);
+        return;
+      }
+      setEloA(a);
+      setEloB(b);
+      setSearched(true);
+    } catch (e) {
+      setError("Impossible de contacter ClubElo pour le moment — réessaie dans un instant.");
+    }
+    setBusy(false);
+  };
+
+  const matchup = eloA && eloB ? computeEloMatchup(eloA.elo, eloB.elo, 100) : null;
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionTitle sub="marché 1X2 · optionnel">Force relative (Elo — ClubElo)</SectionTitle>
+      <div style={{ fontSize: 10.5, color: C.faint, lineHeight: 1.4 }}>
+        Compare deux équipes même si elles ne jouent jamais dans la même ligue (ex. Bodø/Glimt vs Celtic) — via
+        l'historique Elo public de <b style={{ color: C.text }}>ClubElo</b>, calibré par les matchs de coupes
+        d'Europe qui relient les championnats entre eux.
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <TextInput value={nameA} onChange={setNameA} placeholder="Nom ClubElo équipe A" accent={C.teamA} />
+        <TextInput value={nameB} onChange={setNameB} placeholder="Nom ClubElo équipe B" accent={C.teamB} />
+      </div>
+      <button
+        onClick={run}
+        disabled={busy}
+        style={{ background: C.solide + "22", color: C.solide, border: `1px solid ${C.solide}55`, borderRadius: 6, padding: "7px", fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : null} {busy ? "Recherche…" : "Chercher force Elo"}
+      </button>
+      {error && <div style={{ fontSize: 11, color: C.fragile }}>{error}</div>}
+      {searched && eloA && eloB && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_MONO, fontSize: 13 }}>
+            <div>
+              <div style={{ color: C.teamA, fontWeight: 700 }}>{eloA.club}</div>
+              <div style={{ color: C.dim }}>Elo {eloA.elo.toFixed(0)}</div>
+              <div style={{ color: C.faint, fontSize: 10 }}>{eloA.country}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ color: C.teamB, fontWeight: 700 }}>{eloB.club}</div>
+              <div style={{ color: C.dim }}>Elo {eloB.elo.toFixed(0)}</div>
+              <div style={{ color: C.faint, fontSize: 10 }}>{eloB.country}</div>
+            </div>
+          </div>
+          {matchup && (
+            <>
+              <div style={{ background: C.bg, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+                <SplitBar
+                  left={matchup.pHome * 100}
+                  right={matchup.pAway * 100}
+                  colorLeft={C.teamA}
+                  colorRight={C.teamB}
+                  labelLeft={`${(matchup.pHome * 100).toFixed(0)}%`}
+                  labelRight={`${(matchup.pAway * 100).toFixed(0)}%`}
+                />
+                <div style={{ textAlign: "center", fontSize: 11, color: C.faint, marginTop: 6 }}>
+                  Nul : {(matchup.pDraw * 100).toFixed(0)}% · écart Elo {matchup.diff >= 0 ? "+" : ""}{matchup.diff.toFixed(0)} (avantage terrain de {eloA.club} déjà inclus)
+                </div>
+              </div>
+              <div style={{ fontSize: 9.5, color: C.faint, fontStyle: "italic" }}>
+                Probabilités approximatives dérivées de l'écart d'Elo (formule standard + modèle de nul simplifié) —
+                pas la méthode exacte propriétaire de ClubElo, à prendre comme ordre de grandeur, pas comme cote
+                officielle.
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* Répond directement à "quelle équipe est favorite, et quelle mi-temps" : compare les
    deux synthèses (evaluateMiTempsHandicap pour 1MT et 2MT) et met en avant celle avec
    la confiance la plus nette (ratio marge/volatilité le plus élevé), plutôt que de
@@ -2350,6 +2470,8 @@ function ComparateurTab({ teamA, setTeamA, teamB, setTeamB, lignes, setLignes, i
       </section>
 
       <LectureCroisee teamA={effA} teamB={effB} proj={proj} />
+
+      <EloPanel teamAName={teamA.nom} teamBName={teamB.nom} />
 
       <SecondaryStatPanel
         label="Tirs"
