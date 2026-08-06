@@ -1,4 +1,4 @@
-// Proxy côté serveur vers l'API publique ClubElo (http://clubelo.com).
+// Proxy côté serveur vers l'API publique ClubElo (http://api.clubelo.com).
 // Version optimisée pour les noms complexes avec slashs ou accents (ex: Bodø/Glimt)
 
 export async function handler(event) {
@@ -23,7 +23,8 @@ export async function handler(event) {
     // "Bodø/Glimt" ou "Bodo / Glimt" devient "BodoGlimt"
     team = team.replace(/[\s\/\-\_\.\,\'\’]/g, ""); 
 
-    const url = `http://clubelo.com/${team}`;
+    // CORRECTION : Ajout du sous-domaine indispensable 'api.'
+    const url = `http://api.clubelo.com/${team}`;
 
     const res = await fetch(url, {
       method: "GET",
